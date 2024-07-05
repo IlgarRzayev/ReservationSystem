@@ -3,63 +3,70 @@ import java.io.IOException;
 import java.io.InputStreamReader;
 import java.io.PrintWriter;
 import java.net.Socket;
-import java.util.Scanner;
+import java.net.UnknownHostException;
 
-public class client_asenkron {
-    private static final String SERVER_ADDRESS = "localhost";
-    private static final int SERVER_PORT = 12345;
+public class Test implements Runnable {
+    private static final String SERVER_ADDRESS = "127.0.0.1";
+    private static final int SERVER_PORT = 5555;
+    private String clientName;
+    private String option;
+    private int clientId;
+    private int seat;
+
+    public Test(String clientName, String option, int clientId, int seat) {
+        this.clientName = clientName;
+        this.option = option;
+        this.clientId = clientId;
+        this.seat = seat;
+    }
 
     public static void main(String[] args) {
+        Thread client1 = new Thread(new Test("Client1", "makeReservation", 1, 1));
+        Thread client2 = new Thread(new Test("Client2", "makeReservation", 2, 1));
+        Thread client3 = new Thread(new Test("Client3", "makeReservation", 3, 1));
+        
+        Thread client5 = new Thread(new Test("Client1", "queryReservation", 5, 0));
+        Thread client6 = new  Thread(new Test("Client2", "queryReservation", 6, 0));
+        
+        Thread client7 = new Thread(new Test("Client1", "cancelReservation", 7, 0));
+        Thread client8 = new Thread(new Test("Client2", "cancelReservation", 8, 0));
+        
+        client1.start();
+        client2.start();
+        client3.start();
+        
+        client5.start();
+        client6.start();
+        
+        client7.start();
+        client8.start();
+    }
+
+    @Override
+    public void run() {
+        sendOperation(clientName, option, clientId, seat);
+    }
+
+    private void sendOperation(String clientName, String option, int clientId, int seat) {
         try (Socket socket = new Socket(SERVER_ADDRESS, SERVER_PORT);
              BufferedReader in = new BufferedReader(new InputStreamReader(socket.getInputStream()));
-             PrintWriter out = new PrintWriter(socket.getOutputStream(), true);
-             Scanner scanner = new Scanner(System.in)) {
+             PrintWriter out = new PrintWriter(socket.getOutputStream(), true)) {
 
-            while (true) {
-                System.out.println("Enter your client ID:");
-                int clientId = scanner.nextInt();
-                scanner.nextLine(); // Yeni satır karakterini tüketir.
+            // Server'a isteği gönder
+            out.println(option + ":" + clientId + ":" + seat);
 
-                boolean keepGoing = true;
-                while (keepGoing) {
-                    System.out.println("Select an option:\n1. Query Reservation\n2. Make Reservation\n3. Cancel Reservation");
-                    int option = scanner.nextInt();
-                    scanner.nextLine(); // Yeni satır karakterini tüketir.
-
-                    if (option == 1) {
-                        out.println("query:" + clientId);
-                    } else if (option == 2) {
-                        System.out.println("Enter seat number to reserve:");
-                        int seatNo = scanner.nextInt();
-                        scanner.nextLine(); 
-                        out.println("reserve:" + clientId + ":" + seatNo);
-                    } else if (option == 3) {
-                        out.println("remove:" + clientId);
-                    } else {
-                        System.out.println("Invalid option. Try again.");
-                        continue; // Geçersiz seçenek durumunda başa dön
-                    }
-
-                    String response;
-                    while ((response = in.readLine()) != null && !response.isEmpty()) {
-                        System.out.println(response);
-                    }
-
-                    System.out.println("Do you want to perform another action? (yes/no)");
-                    String anotherAction = scanner.nextLine().trim().toLowerCase();
-                    if (!anotherAction.equals("yes")) {
-                        keepGoing = false; // Kullanıcı başka bir işlem yapmak istemiyorsa iç döngüden çık
-                    }
-                }
-
-                System.out.println("Do you want to enter a new client ID? (yes/no)");
-                String newClientId = scanner.nextLine().trim().toLowerCase();
-                if (!newClientId.equals("yes")) {
-                    break; // Kullanıcı yeni bir client ID girmek istemiyorsa dış döngüden çık
-                }
+            // Server'dan gelen cevabı oku ve yazdır
+            String response;
+            while ((response = in.readLine()) != null && !response.isEmpty()) {
+                System.out.println(clientName + " - Server response: " + response);
             }
+
+        } catch (UnknownHostException e) {
+            System.err.println("Unknown host: " + SERVER_ADDRESS);
+            System.exit(1);
         } catch (IOException e) {
             e.printStackTrace();
+            System.exit(1);
         }
     }
 }
