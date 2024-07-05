@@ -1,73 +1,144 @@
-import java.io.BufferedReader;
-import java.io.IOException;
-import java.io.InputStreamReader;
-import java.io.PrintWriter;
-import java.net.Socket;
-import java.net.UnknownHostException;
+import java.io.*;
+import java.net.*;
+import java.time.Instant;
+import java.util.HashMap;
+import java.util.concurrent.locks.Lock;
+import java.util.concurrent.locks.ReentrantLock;
 
-public class Test implements Runnable {
-    private static final String SERVER_ADDRESS = "127.0.0.1";
-    private static final int SERVER_PORT = 5555;
-    private String clientName;
-    private String option;
-    private int clientId;
-    private int seat;
+class ReservationSystem {
+    private int[] seats = new int[5];
+    private HashMap<Integer, Integer> reservations = new HashMap<>();
+    private final Lock lock = new ReentrantLock();
 
-    public Test(String clientName, String option, int clientId, int seat) {
-        this.clientName = clientName;
-        this.option = option;
-        this.clientId = clientId;
-        this.seat = seat;
+    public String queryReservation(int clientId) {
+        StringBuilder status = new StringBuilder();
+        lock.lock();
+        try {
+            status.append("Client[").append(clientId).append("] looks for available seats. State of the seats are:\n");
+            for (int j = 0; j < seats.length; j++) {
+                status.append("Seat No ").append(j + 1).append(" : ").append(seats[j]).append("\n");
+            }
+        } finally {
+            lock.unlock();
+        }
+        System.out.println(status.toString());
+        return status.toString();
     }
 
-    public static void main(String[] args) {
-        Thread client1 = new Thread(new Test("Client1", "makeReservation", 1, 1));
-        Thread client5 = new Thread(new Test("Client5", "queryReservation", 5, 0));
-        Thread client2 = new Thread(new Test("Client2", "makeReservation", 2, 1));
-        Thread client3 = new Thread(new Test("Client3", "makeReservation", 3, 2));
-        
-        Thread client6 = new Thread(new Test("Client6", "queryReservation", 6, 0));
-        
-        Thread client7 = new Thread(new Test("Client7", "cancelReservation", 7, 0));
-        Thread client8 = new Thread(new Test("Client8", "cancelReservation", 8, 1));
-        
-        client1.start();
-        client5.start();
-        client2.start();
-        client3.start();
-        
-        client6.start();
-        
-        client7.start();
-        client8.start();
+    public String makeReservation(int clientId, int seatNo) {
+        StringBuilder status = new StringBuilder();
+        lock.lock();
+        try {
+            status.append("Client[").append(clientId).append("] tries to book the. Seat No: ").append(seatNo).append("\n");
+            if (seatNo < 1 || seatNo > seats.length) {
+                status.append("Invalid seat number.");
+            } else if (seats[seatNo - 1] == 0) {
+                seats[seatNo - 1] = 1;
+                reservations.put(clientId, seatNo);
+                status.append("Client[").append(clientId).append("] booked seat number [").append(seatNo).append("] successfully");
+            } else {
+                status.append("Client[").append(clientId).append("] could not book seat number [").append(seatNo).append("] since it has been already booked.");
+            }
+        } finally {
+            lock.unlock();
+        }
+        System.out.println(status.toString());
+        return status.toString();
+    }
+
+    public String cancelReservation(int clientId) {
+        StringBuilder status = new StringBuilder();
+        lock.lock();
+        try {
+            Integer seatNo = reservations.get(clientId);
+            status.append("Client[").append(clientId).append("] tries for cancel");
+            if (seatNo != null) {
+                status.append(". Seat No: ").append(seatNo).append("\n");
+                seats[seatNo - 1] = 0;
+                reservations.remove(clientId);
+                status.append("Client[").append(clientId).append("]'s reservation for seat number [").append(seatNo).append("] has been canceled.");
+            } else {
+                status.append("\nClient[").append(clientId).append("] does not have a reservation to cancel.");
+            }
+        } finally {
+            lock.unlock();
+        }
+        System.out.println(status.toString());
+        return status.toString();
+    }
+}
+
+class ClientHandler extends Thread {
+    private Socket clientSocket;
+    private ReservationSystem system;
+    private Instant time;
+
+    public ClientHandler(Socket socket, ReservationSystem system) {
+        this.clientSocket = socket;
+        this.system = system;
     }
 
     @Override
     public void run() {
-        sendOperation(clientName, option, clientId, seat);
-    }
+        try (BufferedReader in = new BufferedReader(new InputStreamReader(clientSocket.getInputStream()));
+                PrintWriter out = new PrintWriter(clientSocket.getOutputStream(), true)) {
 
-    private void sendOperation(String clientName, String option, int clientId, int seat) {
-        try (Socket socket = new Socket(SERVER_ADDRESS, SERVER_PORT);
-             BufferedReader in = new BufferedReader(new InputStreamReader(socket.getInputStream()));
-             PrintWriter out = new PrintWriter(socket.getOutputStream(), true)) {
+            String request;
+            while ((request = in.readLine()) != null) {
+                String[] parts = request.split(":");
+                String action = parts[0];
+                int clientId = Integer.parseInt(parts[1]);
+                String response = "";
 
-            // Server'a isteği gönder
-            out.println(option + ":" + clientId + (option.equalsIgnoreCase("makeReservation") ? ":" + seat : ""));
+                if (action.equalsIgnoreCase("queryReservation")) {
+                    response = system.queryReservation(clientId);
+                } else if (action.equalsIgnoreCase("makeReservation")) {
+                    int seatNo = Integer.parseInt(parts[2]);
+                    response = system.makeReservation(clientId, seatNo);
+                } else if (action.equalsIgnoreCase("cancelReservation")) {
+                    response = system.cancelReservation(clientId);
+                } else {
+                    response = "Invalid action.";
+                }
 
-            // Server'dan gelen cevabı oku ve yazdır
-            String response;
-            while ((response = in.readLine()) != null && !response.isEmpty()) {
-                // Burada server'dan gelen bilgileri istemci tarafında yazdırmamamız gerek
-                // System.out.println(clientName + " - Server response: " + response); 
+                out.println(response);
+                out.flush();
+
+                // Log with timestamp
+                time = Instant.now();
+                System.out.println(
+                        "TimeStamp : " + time + String.valueOf(System.nanoTime()) + "\t" + response);
+
+                // Sleep to simulate delay
+                Thread.sleep(300);
             }
+        } catch (IOException | InterruptedException e) {
+            e.printStackTrace();
+        } finally {
+            try {
+                clientSocket.close();
+            } catch (IOException e) {
+                e.printStackTrace();
+            }
+        }
+    }
+}
 
-        } catch (UnknownHostException e) {
-            System.err.println("Unknown host: " + SERVER_ADDRESS);
-            System.exit(1);
+public class Server {
+    private static final int PORT = 5555;
+
+    public static void main(String[] args) {
+        ReservationSystem system = new ReservationSystem();
+        try (ServerSocket serverSocket = new ServerSocket(PORT)) {
+            System.out.println("Reservation system server started...");
+            while (true) {
+                Socket clientSocket = serverSocket.accept();
+                System.out.println("Client connected: " + clientSocket.getInetAddress());
+                ClientHandler clientHandler = new ClientHandler(clientSocket, system);
+                clientHandler.start();
+            }
         } catch (IOException e) {
             e.printStackTrace();
-            System.exit(1);
         }
     }
 }
